@@ -164,14 +164,16 @@ locals {
   requester_aws_route_table_ids_count     = length(local.requester_aws_route_table_ids)
   requester_cidr_block_associations       = flatten(data.aws_vpc.requester.*.cidr_block_associations)
   requester_cidr_block_associations_count = length(local.requester_cidr_block_associations)
+  requester_cidr_blocks                   = [for a in local.requester_cidr_block_associations : a["cidr_block"]]
 }
 
 # Create routes from requester to accepter
 resource "aws_route" "requester" {
-  count                     = local.enabled ? local.requester_aws_route_table_ids_count * local.accepter_cidr_block_associations_count : 0
+  # Keyed by route table and CIDR: a new route table in either VPC no longer shifts existing routes.
+  for_each                  = local.enabled ? { for p in setproduct(local.requester_aws_route_table_ids, local.accepter_cidr_blocks) : "${p[0]}|${p[1]}" => { route_table_id = p[0], cidr_block = p[1] } } : {}
   provider                  = aws.requester
-  route_table_id            = local.requester_aws_route_table_ids[floor(count.index / local.accepter_cidr_block_associations_count)]
-  destination_cidr_block    = local.accepter_cidr_block_associations[count.index % local.accepter_cidr_block_associations_count]["cidr_block"]
+  route_table_id            = each.value.route_table_id
+  destination_cidr_block    = each.value.cidr_block
   vpc_peering_connection_id = join("", aws_vpc_peering_connection.requester.*.id)
   depends_on = [
     data.aws_route_table.requester,
